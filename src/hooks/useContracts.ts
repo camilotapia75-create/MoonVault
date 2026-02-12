@@ -4,7 +4,7 @@ import type { CryptoAsset, Lock } from '../types'
 
 // The deployed Ethereum TimeLock contract address (update after deployment)
 // Find this in Remix IDE after deploying MoonvaultTimeLock
-export const ETH_TIMELOCK_ADDRESS = '0x0000000000000000000000000000000000000000'
+export const ETH_TIMELOCK_ADDRESS: string = '0x0deE2F4e9b2804c5DF22d37c9b234c30D90C2BBE'
 
 // Returns true if contracts are deployed and ready for on-chain transactions
 export function isContractDeployed(chain: 'ethereum' | 'solana'): boolean {
