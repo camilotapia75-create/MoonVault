@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dark-900: #0a0e1a;
+  --color-dark-800: #111827;
+  --color-dark-700: #1a2035;
+  --color-dark-600: #232b3e;
+  --color-dark-500: #2d3548;
+  --color-orange-500: #f97316;
+  --color-orange-600: #ea580c;
+  --color-orange-400: #fb923c;
+  --color-purple-500: #8b5cf6;
+  --color-purple-600: #7c3aed;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  @apply bg-dark-900 text-white font-sans antialiased;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.gradient-bg {
+  background: linear-gradient(180deg, #1a1040 0%, #0a0e1a 50%);
+}
+
+.card-gradient {
+  background: linear-gradient(135deg, #1a2035 0%, #111827 100%);
+}
+
+.orange-gradient-btn {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+}
+
+.orange-gradient-btn:hover {
+  background: linear-gradient(135deg, #fb923c 0%, #f97316 100%);
+}
