@@ -5,6 +5,12 @@ import type { CryptoAsset, Lock } from '../types'
 // The deployed Ethereum TimeLock contract address (update after deployment)
 export const ETH_TIMELOCK_ADDRESS = '0x0000000000000000000000000000000000000000'
 
+// Returns true if contracts are deployed and ready for on-chain transactions
+export function isContractDeployed(chain: 'ethereum' | 'solana'): boolean {
+  if (chain === 'ethereum') return ETH_TIMELOCK_ADDRESS !== '0x0000000000000000000000000000000000000000'
+  return SOLANA_PROGRAM_ID !== '11111111111111111111111111111111'
+}
+
 // ABI for the MoonVaultTimeLock Ethereum contract
 export const ETH_TIMELOCK_ABI = [
   {

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useWallet } from '../context/WalletContext'
 import type { Lock, CryptoAsset } from '../types'
 import { CRYPTO_ASSETS } from '../types'
-import { createTimeLock, withdrawTimeLock, getUserLocks } from './useContracts'
+import { createTimeLock, withdrawTimeLock, getUserLocks, isContractDeployed } from './useContracts'
 
 interface CreateLockParams {
   crypto: CryptoAsset
@@ -79,6 +79,21 @@ export function useLocks() {
         throw new Error('Wallet not connected')
       }
 
+      // Demo mode: store locks locally when contracts aren't deployed
+      if (!isContractDeployed(wallet.chain)) {
+        const newLock: Lock = {
+          id: crypto.randomUUID(),
+          crypto: params.crypto,
+          amount: params.amount,
+          unlockDate: params.unlockDate,
+          createdAt: new Date(),
+          status: 'locked',
+          chain: wallet.chain,
+        }
+        setLocks((prev) => [...prev, newLock])
+        return newLock
+      }
+
       const txHash = await createTimeLock(
         wallet.chain,
         params.crypto,
@@ -109,6 +124,14 @@ export function useLocks() {
 
       const lock = locks.find((l) => l.id === lockId)
       if (!lock) return
+
+      // Demo mode: just update local state
+      if (!isContractDeployed(wallet.chain)) {
+        setLocks((prev) =>
+          prev.map((l) => (l.id === lockId ? { ...l, status: 'withdrawn' as const } : l)),
+        )
+        return
+      }
 
       try {
         await withdrawTimeLock(wallet.chain, lockId)
