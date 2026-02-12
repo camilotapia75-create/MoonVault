@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useWallet } from '../context/WalletContext'
 import type { Lock, CryptoAsset } from '../types'
 import { CRYPTO_ASSETS } from '../types'
-import { createTimeLock, withdrawTimeLock, getUserLocks, isContractDeployed } from './useContracts'
+import { createTimeLock, withdrawTimeLock, fetchUserLocks, isContractDeployed } from './useContracts'
 
 interface CreateLockParams {
   crypto: CryptoAsset
@@ -63,10 +63,13 @@ export function useLocks() {
     if (!wallet.address || !wallet.chain) return
     setLoading(true)
     try {
-      const onChainLocks = await getUserLocks(wallet.address, wallet.chain)
-      setLocks(onChainLocks.length > 0 ? onChainLocks : MOCK_LOCKS)
+      if (isContractDeployed(wallet.chain)) {
+        const onChainLocks = await fetchUserLocks(wallet.address, wallet.chain)
+        setLocks(onChainLocks.length > 0 ? onChainLocks : MOCK_LOCKS)
+      } else {
+        setLocks(MOCK_LOCKS)
+      }
     } catch {
-      // Fall back to mock data if contract calls fail
       setLocks(MOCK_LOCKS)
     } finally {
       setLoading(false)
@@ -94,7 +97,7 @@ export function useLocks() {
         return newLock
       }
 
-      const txHash = await createTimeLock(
+      const result = await createTimeLock(
         wallet.chain,
         params.crypto,
         params.amount,
@@ -102,13 +105,13 @@ export function useLocks() {
       )
 
       const newLock: Lock = {
-        id: txHash || crypto.randomUUID(),
+        id: String(result.lockId),
         crypto: params.crypto,
         amount: params.amount,
         unlockDate: params.unlockDate,
         createdAt: new Date(),
         status: 'locked',
-        txHash,
+        txHash: result.txHash,
         chain: wallet.chain,
       }
 

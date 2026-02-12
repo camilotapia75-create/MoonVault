@@ -15,8 +15,18 @@ export default function CreateLock() {
   const [unlockDate, setUnlockDate] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Minimum unlock date: at least 1 day + 1 hour buffer from now (matches contract's minimumLockTime)
+  const minUnlockDate = new Date(Date.now() + 25 * 60 * 60 * 1000)
+  const minDateString = minUnlockDate.toISOString().slice(0, 16)
+
+  const unlockDateTooSoon = unlockDate ? new Date(unlockDate).getTime() < minUnlockDate.getTime() : false
+
+  // Only ETH is supported on Ethereum chain for now (no ERC-20 support yet)
+  const isUnsupportedToken = selectedCrypto && wallet.chain === 'ethereum' && selectedCrypto.symbol !== 'ETH'
+
   const handleSubmit = async () => {
     if (!selectedCrypto || !amount || !unlockDate || !wallet.connected) return
+    if (unlockDateTooSoon || isUnsupportedToken) return
 
     setIsSubmitting(true)
     try {
@@ -28,13 +38,13 @@ export default function CreateLock() {
       navigate('/')
     } catch (err) {
       console.error('Failed to create lock:', err)
-      alert('Failed to create lock. Please try again.')
+      alert(err instanceof Error ? err.message : 'Failed to create lock. Please try again.')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const isValid = selectedCrypto && parseFloat(amount) > 0 && unlockDate && wallet.connected
+  const isValid = selectedCrypto && parseFloat(amount) > 0 && unlockDate && wallet.connected && !unlockDateTooSoon && !isUnsupportedToken
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-12">
@@ -52,7 +62,12 @@ export default function CreateLock() {
 
       <div className="card-gradient border border-white/5 rounded-2xl p-8 space-y-8">
         {/* Crypto Selector */}
-        <CryptoSelector selected={selectedCrypto} onSelect={setSelectedCrypto} />
+        <CryptoSelector selected={selectedCrypto} onSelect={setSelectedCrypto} chain={wallet.chain} />
+        {isUnsupportedToken && (
+          <p className="text-xs text-red-400 -mt-4">
+            Only ETH is currently supported for locking on Ethereum. ERC-20 token support coming soon.
+          </p>
+        )}
 
         {/* Amount */}
         <div>
@@ -98,12 +113,20 @@ export default function CreateLock() {
             type="datetime-local"
             value={unlockDate}
             onChange={(e) => setUnlockDate(e.target.value)}
-            min={new Date().toISOString().slice(0, 16)}
-            className="w-full bg-dark-600 border border-white/10 rounded-xl text-white p-4 outline-none [color-scheme:dark]"
+            min={minDateString}
+            className={`w-full bg-dark-600 border rounded-xl text-white p-4 outline-none [color-scheme:dark] ${
+              unlockDateTooSoon ? 'border-red-500/50' : 'border-white/10'
+            }`}
           />
-          <p className="text-xs text-gray-500 mt-2">
-            Your funds will be locked until this date and time
-          </p>
+          {unlockDateTooSoon ? (
+            <p className="text-xs text-red-400 mt-2">
+              Minimum lock period is 1 day. Please choose a later date.
+            </p>
+          ) : (
+            <p className="text-xs text-gray-500 mt-2">
+              Your funds will be locked until this date and time (minimum 1 day)
+            </p>
+          )}
         </div>
 
         {/* Security Notice */}
