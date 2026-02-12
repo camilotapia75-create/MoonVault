@@ -3,6 +3,7 @@ import type { CryptoAsset, Lock } from '../types'
 // ----- Ethereum Contract Integration -----
 
 // The deployed Ethereum TimeLock contract address (update after deployment)
+// Find this in Remix IDE after deploying MoonvaultTimeLock
 export const ETH_TIMELOCK_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 // Returns true if contracts are deployed and ready for on-chain transactions
@@ -11,49 +12,72 @@ export function isContractDeployed(chain: 'ethereum' | 'solana'): boolean {
   return SOLANA_PROGRAM_ID !== '11111111111111111111111111111111'
 }
 
-// ABI for the MoonVaultTimeLock Ethereum contract
+// ABI for the deployed MoonvaultTimeLock contract
 export const ETH_TIMELOCK_ABI = [
   {
-    inputs: [{ name: 'unlockTime', type: 'uint256' }],
-    name: 'createLock',
-    outputs: [{ name: 'lockId', type: 'uint256' }],
+    inputs: [
+      { name: '_unlockTime', type: 'uint256' },
+      { name: '_description', type: 'string' },
+    ],
+    name: 'createNativeLock',
+    outputs: [{ name: '', type: 'uint256' }],
     stateMutability: 'payable',
     type: 'function',
   },
   {
-    inputs: [
-      { name: 'token', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-      { name: 'unlockTime', type: 'uint256' },
-    ],
-    name: 'createTokenLock',
-    outputs: [{ name: 'lockId', type: 'uint256' }],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
-    inputs: [{ name: 'lockId', type: 'uint256' }],
-    name: 'withdraw',
+    inputs: [{ name: '_lockId', type: 'uint256' }],
+    name: 'unlockCrypto',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
   },
   {
-    inputs: [{ name: 'user', type: 'address' }],
+    inputs: [{ name: '_lockId', type: 'uint256' }],
+    name: 'cancelLock',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '_user', type: 'address' }],
     name: 'getUserLocks',
+    outputs: [{ name: '', type: 'uint256[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '_lockId', type: 'uint256' }],
+    name: 'getLock',
     outputs: [
       {
         components: [
-          { name: 'id', type: 'uint256' },
-          { name: 'token', type: 'address' },
+          { name: 'owner', type: 'address' },
+          { name: 'tokenAddress', type: 'address' },
           { name: 'amount', type: 'uint256' },
           { name: 'unlockTime', type: 'uint256' },
-          { name: 'withdrawn', type: 'bool' },
+          { name: 'status', type: 'uint8' },
+          { name: 'description', type: 'string' },
+          { name: 'isNativeToken', type: 'bool' },
+          { name: 'createdAt', type: 'uint256' },
         ],
         name: '',
-        type: 'tuple[]',
+        type: 'tuple',
       },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '_lockId', type: 'uint256' }],
+    name: 'isReadyToUnlock',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: '_amount', type: 'uint256' }],
+    name: 'calculateFee',
+    outputs: [{ name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -72,11 +96,12 @@ export async function createTimeLock(
   amount: number,
   unlockDate: Date,
 ): Promise<string> {
-  const unlockTimestamp = Math.floor(unlockDate.getTime() / 1000)
-
   if (chain === 'ethereum') {
-    return createEthereumLock(crypto, amount, unlockTimestamp)
+    // The deployed contract expects unlock time in MILLISECONDS (divides by 1000 internally)
+    const unlockTimeMs = unlockDate.getTime()
+    return createEthereumLock(crypto, amount, unlockTimeMs)
   } else {
+    const unlockTimestamp = Math.floor(unlockDate.getTime() / 1000)
     return createSolanaLock(crypto, amount, unlockTimestamp)
   }
 }
@@ -84,13 +109,14 @@ export async function createTimeLock(
 async function createEthereumLock(
   crypto: CryptoAsset,
   amount: number,
-  unlockTimestamp: number,
+  unlockTimeMs: number,
 ): Promise<string> {
   if (!window.ethereum) throw new Error('MetaMask not found')
 
   // For native ETH locks
   if (crypto.symbol === 'ETH') {
     const amountWei = '0x' + BigInt(Math.floor(amount * 1e18)).toString(16)
+    const description = `MoonVault Lock: ${amount} ${crypto.symbol}`
 
     const txHash = await window.ethereum.request({
       method: 'eth_sendTransaction',
@@ -98,7 +124,7 @@ async function createEthereumLock(
         {
           to: ETH_TIMELOCK_ADDRESS,
           value: amountWei,
-          data: encodeCreateLock(unlockTimestamp),
+          data: encodeCreateNativeLock(unlockTimeMs, description),
         },
       ],
     })
@@ -106,8 +132,7 @@ async function createEthereumLock(
   }
 
   // For ERC-20 token locks (USDT, BNB, etc.)
-  // In production, you'd approve the token first, then call createTokenLock
-  console.log(`Creating ERC-20 lock: ${amount} ${crypto.symbol} until ${unlockTimestamp}`)
+  console.log(`Creating ERC-20 lock: ${amount} ${crypto.symbol} until ${unlockTimeMs}`)
   throw new Error(`ERC-20 token locking for ${crypto.symbol} requires token contract address configuration`)
 }
 
@@ -119,7 +144,6 @@ async function createSolanaLock(
   const solana = (window as { solana?: { isPhantom: boolean; signAndSendTransaction: (tx: unknown) => Promise<{ signature: string }> } }).solana
   if (!solana?.isPhantom) throw new Error('Phantom wallet not found')
 
-  // In production, build and send a Solana transaction to the MoonVault program
   console.log(`Creating Solana lock: ${amount} ${crypto.symbol} until ${unlockTimestamp}`)
   throw new Error('Solana program interaction requires @solana/web3.js - deploy the program first')
 }
@@ -136,7 +160,7 @@ export async function withdrawTimeLock(
       params: [
         {
           to: ETH_TIMELOCK_ADDRESS,
-          data: encodeWithdraw(parseInt(lockId)),
+          data: encodeUnlockCrypto(parseInt(lockId)),
         },
       ],
     })
@@ -157,16 +181,34 @@ export async function getUserLocks(
 
 // ----- ABI Encoding Helpers -----
 
-function encodeCreateLock(unlockTimestamp: number): string {
-  // function selector for createLock(uint256)
-  const selector = '0xb8a24252'
-  const encodedTime = unlockTimestamp.toString(16).padStart(64, '0')
-  return selector + encodedTime
+function encodeCreateNativeLock(unlockTimeMs: number, description: string): string {
+  // function selector for createNativeLock(uint256,string)
+  const selector = '2f57487f'
+
+  // Encode uint256 _unlockTime (in milliseconds)
+  const encodedTime = BigInt(Math.floor(unlockTimeMs)).toString(16).padStart(64, '0')
+
+  // Offset to string data: 2 static params * 32 bytes = 64 = 0x40
+  const stringOffset = (64).toString(16).padStart(64, '0')
+
+  // Encode string: length + padded UTF-8 bytes
+  const encoder = new TextEncoder()
+  const stringBytes = encoder.encode(description)
+  const stringLength = stringBytes.length.toString(16).padStart(64, '0')
+
+  const paddedByteLength = Math.ceil(stringBytes.length / 32) * 32
+  let stringData = ''
+  for (const byte of stringBytes) {
+    stringData += byte.toString(16).padStart(2, '0')
+  }
+  stringData = stringData.padEnd(paddedByteLength * 2, '0')
+
+  return '0x' + selector + encodedTime + stringOffset + stringLength + stringData
 }
 
-function encodeWithdraw(lockId: number): string {
-  // function selector for withdraw(uint256)
-  const selector = '0x2e1a7d4d'
+function encodeUnlockCrypto(lockId: number): string {
+  // function selector for unlockCrypto(uint256)
+  const selector = '635429c6'
   const encodedId = lockId.toString(16).padStart(64, '0')
-  return selector + encodedId
+  return '0x' + selector + encodedId
 }

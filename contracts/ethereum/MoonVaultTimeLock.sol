@@ -1,134 +1,196 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "./IERC20.sol";
-
 /// @title MoonVault TimeLock
-/// @notice Lock ETH or ERC-20 tokens until a specified unlock date.
+/// @notice Lock native ETH in a time-locked smart contract.
 ///         Once locked, funds cannot be withdrawn before the unlock time.
-contract MoonVaultTimeLock {
-    struct LockInfo {
-        uint256 id;
+///         Includes fee system, cancellation, and description metadata.
+contract MoonvaultTimeLock {
+    enum LockStatus { Active, Unlocked, Cancelled }
+
+    struct CryptoLock {
         address owner;
-        address token;      // address(0) for native ETH
+        address tokenAddress;   // address(0) for native ETH
         uint256 amount;
-        uint256 unlockTime;
-        bool withdrawn;
+        uint256 unlockTime;     // Unix timestamp (seconds)
+        LockStatus status;
+        string description;
+        bool isNativeToken;
+        uint256 createdAt;
     }
 
-    uint256 public nextLockId;
-    mapping(uint256 => LockInfo) public locks;
-    mapping(address => uint256[]) public userLockIds;
+    address public owner;
+    address public feeAddress;
+    uint256 public feePercentage = 50;            // 50/10000 = 0.5%
+    uint256 public minimumLockTime = 86400;       // 1 day in seconds
+    uint256 public maximumLockTime = 315360000;   // ~10 years in seconds
+    uint256 public lockCounter;
+    uint256 public totalLockedValue;
+
+    mapping(uint256 => CryptoLock) public locks;
+    mapping(address => uint256[]) public userLocks;
+    mapping(address => uint256) public userLockCount;
 
     event LockCreated(
         uint256 indexed lockId,
         address indexed owner,
-        address token,
+        address indexed tokenAddress,
         uint256 amount,
-        uint256 unlockTime
+        uint256 unlockTime,
+        uint256 createdAt
     );
 
-    event Withdrawn(uint256 indexed lockId, address indexed owner, uint256 amount);
+    event LockUnlocked(
+        uint256 indexed lockId,
+        address indexed owner,
+        address indexed tokenAddress,
+        uint256 amount,
+        uint256 unlockedAt
+    );
 
-    error UnlockTimeInPast();
-    error ZeroAmount();
-    error LockNotFound();
-    error NotOwner();
-    error StillLocked();
-    error AlreadyWithdrawn();
-    error TransferFailed();
+    event LockCancelled(
+        uint256 indexed lockId,
+        address indexed owner,
+        uint256 amount
+    );
 
-    /// @notice Lock native ETH until `unlockTime`.
-    /// @param unlockTime Unix timestamp when the lock expires.
-    /// @return lockId The unique identifier for this lock.
-    function createLock(uint256 unlockTime) external payable returns (uint256 lockId) {
-        if (unlockTime <= block.timestamp) revert UnlockTimeInPast();
-        if (msg.value == 0) revert ZeroAmount();
-
-        lockId = nextLockId++;
-        locks[lockId] = LockInfo({
-            id: lockId,
-            owner: msg.sender,
-            token: address(0),
-            amount: msg.value,
-            unlockTime: unlockTime,
-            withdrawn: false
-        });
-        userLockIds[msg.sender].push(lockId);
-
-        emit LockCreated(lockId, msg.sender, address(0), msg.value, unlockTime);
+    constructor(address _feeAddress) {
+        require(_feeAddress != address(0), "Invalid fee address");
+        owner = msg.sender;
+        feeAddress = _feeAddress;
+        lockCounter = 0;
     }
 
-    /// @notice Lock ERC-20 tokens until `unlockTime`.
-    /// @dev Caller must approve this contract to spend `amount` tokens first.
-    /// @param token The ERC-20 token contract address.
-    /// @param amount The number of tokens to lock.
-    /// @param unlockTime Unix timestamp when the lock expires.
-    /// @return lockId The unique identifier for this lock.
-    function createTokenLock(
-        address token,
-        uint256 amount,
-        uint256 unlockTime
-    ) external returns (uint256 lockId) {
-        if (unlockTime <= block.timestamp) revert UnlockTimeInPast();
-        if (amount == 0) revert ZeroAmount();
+    receive() external payable {}
 
-        bool success = IERC20(token).transferFrom(msg.sender, address(this), amount);
-        if (!success) revert TransferFailed();
+    /// @notice Lock native ETH until a specified time.
+    /// @param _unlockTime Unlock time in MILLISECONDS (divided by 1000 internally).
+    /// @param _description Human-readable description of the lock.
+    /// @return The lock ID.
+    function createNativeLock(uint256 _unlockTime, string calldata _description) external payable returns (uint256) {
+        require(msg.value > 0, "Must send native tokens");
 
-        lockId = nextLockId++;
-        locks[lockId] = LockInfo({
-            id: lockId,
+        uint256 unlockTimeSeconds = _unlockTime / 1000;
+        require(unlockTimeSeconds > block.timestamp + minimumLockTime, "Unlock time too soon");
+        require(unlockTimeSeconds <= block.timestamp + maximumLockTime, "Unlock time too far");
+
+        uint256 lockId = lockCounter;
+
+        locks[lockId] = CryptoLock({
             owner: msg.sender,
-            token: token,
-            amount: amount,
-            unlockTime: unlockTime,
-            withdrawn: false
+            tokenAddress: address(0),
+            amount: msg.value,
+            unlockTime: unlockTimeSeconds,
+            status: LockStatus.Active,
+            description: _description,
+            isNativeToken: true,
+            createdAt: block.timestamp
         });
-        userLockIds[msg.sender].push(lockId);
 
-        emit LockCreated(lockId, msg.sender, token, amount, unlockTime);
+        userLocks[msg.sender].push(lockId);
+        userLockCount[msg.sender]++;
+        lockCounter++;
+        totalLockedValue += msg.value;
+
+        emit LockCreated(lockId, msg.sender, address(0), msg.value, unlockTimeSeconds, block.timestamp);
+
+        return lockId;
     }
 
     /// @notice Withdraw funds from an expired lock.
-    /// @param lockId The lock to withdraw from.
-    function withdraw(uint256 lockId) external {
-        LockInfo storage lock = locks[lockId];
-        if (lock.owner == address(0)) revert LockNotFound();
-        if (lock.owner != msg.sender) revert NotOwner();
-        if (block.timestamp < lock.unlockTime) revert StillLocked();
-        if (lock.withdrawn) revert AlreadyWithdrawn();
+    /// @param _lockId The lock to withdraw from.
+    function unlockCrypto(uint256 _lockId) external {
+        require(_lockId < lockCounter, "Lock does not exist");
+        require(msg.sender == locks[_lockId].owner, "Not lock owner");
+        require(locks[_lockId].status == LockStatus.Active, "Lock not active");
 
-        lock.withdrawn = true;
+        CryptoLock storage lock = locks[_lockId];
+        require(block.timestamp >= lock.unlockTime, "Time lock not reached");
 
-        if (lock.token == address(0)) {
-            (bool sent, ) = payable(msg.sender).call{value: lock.amount}("");
-            if (!sent) revert TransferFailed();
-        } else {
-            bool success = IERC20(lock.token).transfer(msg.sender, lock.amount);
-            if (!success) revert TransferFailed();
+        uint256 fee = (lock.amount * feePercentage) / 10000;
+        uint256 payout = lock.amount - fee;
+
+        lock.status = LockStatus.Unlocked;
+        totalLockedValue -= lock.amount;
+
+        if (fee > 0) {
+            (bool feeSuccess, ) = feeAddress.call{value: fee}("");
+            require(feeSuccess, "Fee transfer failed");
         }
 
-        emit Withdrawn(lockId, msg.sender, lock.amount);
+        (bool success, ) = lock.owner.call{value: payout}("");
+        require(success, "Transfer failed");
+
+        emit LockUnlocked(_lockId, lock.owner, address(0), payout, block.timestamp);
     }
 
-    /// @notice Get all lock IDs for a user.
-    function getUserLockIds(address user) external view returns (uint256[] memory) {
-        return userLockIds[user];
+    /// @notice Cancel an active lock and refund the full amount (no fee).
+    /// @param _lockId The lock to cancel.
+    function cancelLock(uint256 _lockId) external {
+        require(_lockId < lockCounter, "Lock does not exist");
+        require(msg.sender == locks[_lockId].owner, "Not lock owner");
+        require(locks[_lockId].status == LockStatus.Active, "Lock not active");
+
+        CryptoLock storage lock = locks[_lockId];
+        uint256 amount = lock.amount;
+
+        lock.status = LockStatus.Cancelled;
+        totalLockedValue -= amount;
+
+        (bool success, ) = lock.owner.call{value: amount}("");
+        require(success, "Refund failed");
+
+        emit LockCancelled(_lockId, lock.owner, amount);
     }
 
-    /// @notice Get full lock details for a user.
-    function getUserLocks(address user) external view returns (LockInfo[] memory) {
-        uint256[] memory ids = userLockIds[user];
-        LockInfo[] memory result = new LockInfo[](ids.length);
-        for (uint256 i = 0; i < ids.length; i++) {
-            result[i] = locks[ids[i]];
+    // ----- View Functions -----
+
+    function getActiveLockCount() external view returns (uint256) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < lockCounter; i++) {
+            if (locks[i].status == LockStatus.Active) {
+                count++;
+            }
         }
-        return result;
+        return count;
     }
 
-    /// @notice Get a single lock's details.
-    function getLock(uint256 lockId) external view returns (LockInfo memory) {
-        return locks[lockId];
+    function getUserLocks(address _user) external view returns (uint256[] memory) {
+        return userLocks[_user];
+    }
+
+    function getLock(uint256 _lockId) external view returns (CryptoLock memory) {
+        require(_lockId < lockCounter, "Lock does not exist");
+        return locks[_lockId];
+    }
+
+    function isReadyToUnlock(uint256 _lockId) external view returns (bool) {
+        require(_lockId < lockCounter, "Lock does not exist");
+        return locks[_lockId].status == LockStatus.Active && block.timestamp >= locks[_lockId].unlockTime;
+    }
+
+    function getTimeRemaining(uint256 _lockId) external view returns (int256) {
+        require(_lockId < lockCounter, "Lock does not exist");
+        CryptoLock memory lock = locks[_lockId];
+        if (lock.status != LockStatus.Active) return 0;
+        return int256(lock.unlockTime) - int256(block.timestamp);
+    }
+
+    function calculateFee(uint256 _amount) external view returns (uint256) {
+        return (_amount * feePercentage) / 10000;
+    }
+
+    // ----- Admin Functions -----
+
+    function setFeeAddress(address _newFeeAddress) external {
+        require(msg.sender == owner, "Only owner");
+        require(_newFeeAddress != address(0), "Invalid address");
+        feeAddress = _newFeeAddress;
+    }
+
+    function setFeePercentage(uint256 _newFeePercentage) external {
+        require(msg.sender == owner, "Only owner");
+        require(_newFeePercentage <= 1000, "Fee too high");
+        feePercentage = _newFeePercentage;
     }
 }
