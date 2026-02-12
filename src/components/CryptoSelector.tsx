@@ -6,14 +6,10 @@ interface CryptoSelectorProps {
   chain?: 'ethereum' | 'solana' | null
 }
 
-// Tokens supported per chain (native tokens only for now)
-const SUPPORTED_TOKENS: Record<string, string[]> = {
-  ethereum: ['ETH'],
-  solana: ['SOL'],
-}
+// Only tokens with deployed smart contracts are selectable
+const LIVE_TOKENS = ['ETH']
 
-export default function CryptoSelector({ selected, onSelect, chain }: CryptoSelectorProps) {
-  const supported = chain ? SUPPORTED_TOKENS[chain] : null
+export default function CryptoSelector({ selected, onSelect }: CryptoSelectorProps) {
 
   return (
     <div>
@@ -22,7 +18,7 @@ export default function CryptoSelector({ selected, onSelect, chain }: CryptoSele
       </label>
       <div className="grid grid-cols-3 gap-3">
         {CRYPTO_ASSETS.map((asset) => {
-          const isSupported = !supported || supported.includes(asset.symbol)
+          const isSupported = LIVE_TOKENS.includes(asset.symbol)
           return (
             <button
               key={asset.id}
