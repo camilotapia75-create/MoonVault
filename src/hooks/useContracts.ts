@@ -32,13 +32,6 @@ export const ETH_TIMELOCK_ABI = [
     type: 'function',
   },
   {
-    inputs: [{ name: '_lockId', type: 'uint256' }],
-    name: 'cancelLock',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
     inputs: [{ name: '_user', type: 'address' }],
     name: 'getUserLocks',
     outputs: [{ name: '', type: 'uint256[]' }],

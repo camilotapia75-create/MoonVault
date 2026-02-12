@@ -4,9 +4,9 @@ pragma solidity ^0.8.24;
 /// @title MoonVault TimeLock
 /// @notice Lock native ETH in a time-locked smart contract.
 ///         Once locked, funds cannot be withdrawn before the unlock time.
-///         Includes fee system, cancellation, and description metadata.
+///         Includes fee system and description metadata.
 contract MoonvaultTimeLock {
-    enum LockStatus { Active, Unlocked, Cancelled }
+    enum LockStatus { Active, Unlocked }
 
     struct CryptoLock {
         address owner;
@@ -22,7 +22,6 @@ contract MoonvaultTimeLock {
     address public owner;
     address public feeAddress;
     uint256 public feePercentage = 50;            // 50/10000 = 0.5%
-    uint256 public cancellationPenalty = 500;     // 500/10000 = 5%
     uint256 public minimumLockTime = 86400;       // 1 day in seconds
     uint256 public maximumLockTime = 315360000;   // ~10 years in seconds
     uint256 public lockCounter;
@@ -47,12 +46,6 @@ contract MoonvaultTimeLock {
         address indexed tokenAddress,
         uint256 amount,
         uint256 unlockedAt
-    );
-
-    event LockCancelled(
-        uint256 indexed lockId,
-        address indexed owner,
-        uint256 amount
     );
 
     constructor(address _feeAddress) {
@@ -123,32 +116,6 @@ contract MoonvaultTimeLock {
         require(success, "Transfer failed");
 
         emit LockUnlocked(_lockId, lock.owner, address(0), payout, block.timestamp);
-    }
-
-    /// @notice Cancel an active lock with a 5% penalty sent to feeAddress.
-    /// @param _lockId The lock to cancel.
-    function cancelLock(uint256 _lockId) external {
-        require(_lockId < lockCounter, "Lock does not exist");
-        require(msg.sender == locks[_lockId].owner, "Not lock owner");
-        require(locks[_lockId].status == LockStatus.Active, "Lock not active");
-
-        CryptoLock storage lock = locks[_lockId];
-        uint256 amount = lock.amount;
-        uint256 penalty = (amount * cancellationPenalty) / 10000;
-        uint256 refund = amount - penalty;
-
-        lock.status = LockStatus.Cancelled;
-        totalLockedValue -= amount;
-
-        if (penalty > 0) {
-            (bool penaltySent, ) = feeAddress.call{value: penalty}("");
-            require(penaltySent, "Penalty transfer failed");
-        }
-
-        (bool success, ) = lock.owner.call{value: refund}("");
-        require(success, "Refund failed");
-
-        emit LockCancelled(_lockId, lock.owner, refund);
     }
 
     // ----- View Functions -----
