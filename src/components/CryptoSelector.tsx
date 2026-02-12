@@ -26,7 +26,8 @@ export default function CryptoSelector({ selected, onSelect, chain }: CryptoSele
           return (
             <button
               key={asset.id}
-              onClick={() => onSelect(asset)}
+              disabled={!isSupported}
+              onClick={() => isSupported && onSelect(asset)}
               className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border transition-all bg-dark-600 ${
                 !isSupported
                   ? 'border-white/5 opacity-40 cursor-not-allowed'
