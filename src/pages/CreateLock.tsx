@@ -24,9 +24,16 @@ export default function CreateLock() {
   // Only ETH is supported on Ethereum chain for now (no ERC-20 support yet)
   const isUnsupportedToken = selectedCrypto && wallet.chain === 'ethereum' && selectedCrypto.symbol !== 'ETH'
 
+  const [error, setError] = useState('')
+
   const handleSubmit = async () => {
-    if (!selectedCrypto || !amount || !unlockDate || !wallet.connected) return
-    if (unlockDateTooSoon || isUnsupportedToken) return
+    setError('')
+    if (!wallet.connected) { setError('Please connect your wallet first.'); return }
+    if (!selectedCrypto) { setError('Please select a cryptocurrency.'); return }
+    if (isUnsupportedToken) { setError(`Only ETH is supported on Ethereum. Select ETH to continue.`); return }
+    if (!amount || parseFloat(amount) <= 0) { setError('Please enter an amount greater than 0.'); return }
+    if (!unlockDate) { setError('Please select an unlock date.'); return }
+    if (unlockDateTooSoon) { setError('Minimum lock period is 1 day. Choose a later date.'); return }
 
     setIsSubmitting(true)
     try {
@@ -38,13 +45,13 @@ export default function CreateLock() {
       navigate('/')
     } catch (err) {
       console.error('Failed to create lock:', err)
-      alert(err instanceof Error ? err.message : 'Failed to create lock. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to create lock. Please try again.')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const isValid = selectedCrypto && parseFloat(amount) > 0 && unlockDate && wallet.connected && !unlockDateTooSoon && !isUnsupportedToken
+  const isFormReady = selectedCrypto && !isUnsupportedToken && parseFloat(amount) > 0 && unlockDate && !unlockDateTooSoon
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-12">
@@ -146,6 +153,13 @@ export default function CreateLock() {
           </div>
         </div>
 
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-400">
+            {error}
+          </div>
+        )}
+
         {/* Submit */}
         {!wallet.connected ? (
           <div className="text-center text-gray-400 text-sm py-4">
@@ -154,11 +168,10 @@ export default function CreateLock() {
         ) : (
           <button
             onClick={handleSubmit}
-            disabled={!isValid || isSubmitting}
             className={`w-full py-4 rounded-xl text-base font-bold text-white border-0 cursor-pointer transition-all ${
-              isValid && !isSubmitting
-                ? 'orange-gradient-btn'
-                : 'bg-dark-500 text-gray-500 cursor-not-allowed'
+              isFormReady && !isSubmitting
+                ? 'orange-gradient-btn hover:scale-[1.01]'
+                : 'bg-dark-500 text-gray-400'
             }`}
           >
             {isSubmitting ? 'Creating Lock...' : 'CREATE LOCK →'}
