@@ -22,6 +22,7 @@ contract MoonvaultTimeLock {
     address public owner;
     address public feeAddress;
     uint256 public feePercentage = 50;            // 50/10000 = 0.5%
+    uint256 public cancellationPenalty = 500;     // 500/10000 = 5%
     uint256 public minimumLockTime = 86400;       // 1 day in seconds
     uint256 public maximumLockTime = 315360000;   // ~10 years in seconds
     uint256 public lockCounter;
@@ -124,7 +125,7 @@ contract MoonvaultTimeLock {
         emit LockUnlocked(_lockId, lock.owner, address(0), payout, block.timestamp);
     }
 
-    /// @notice Cancel an active lock and refund the full amount (no fee).
+    /// @notice Cancel an active lock with a 5% penalty sent to feeAddress.
     /// @param _lockId The lock to cancel.
     function cancelLock(uint256 _lockId) external {
         require(_lockId < lockCounter, "Lock does not exist");
@@ -133,14 +134,21 @@ contract MoonvaultTimeLock {
 
         CryptoLock storage lock = locks[_lockId];
         uint256 amount = lock.amount;
+        uint256 penalty = (amount * cancellationPenalty) / 10000;
+        uint256 refund = amount - penalty;
 
         lock.status = LockStatus.Cancelled;
         totalLockedValue -= amount;
 
-        (bool success, ) = lock.owner.call{value: amount}("");
+        if (penalty > 0) {
+            (bool penaltySent, ) = feeAddress.call{value: penalty}("");
+            require(penaltySent, "Penalty transfer failed");
+        }
+
+        (bool success, ) = lock.owner.call{value: refund}("");
         require(success, "Refund failed");
 
-        emit LockCancelled(_lockId, lock.owner, amount);
+        emit LockCancelled(_lockId, lock.owner, refund);
     }
 
     // ----- View Functions -----
